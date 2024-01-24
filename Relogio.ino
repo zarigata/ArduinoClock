@@ -1,37 +1,96 @@
-/*
-  Blink
+#include <ESP8266WiFi.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+#include "SoftwareSerial.h"
+#include "DFRobotDFPlayerMini.h"
 
-  Turns an LED on for one second, then off for one second, repeatedly.
+const char* ssid = "your_SSID";
+const char* password = "your_PASSWORD";
 
-  Most Arduinos have an on-board LED you can control. On the UNO, MEGA and ZERO
-  it is attached to digital pin 13, on MKR1000 on pin 6. LED_BUILTIN is set to
-  the correct LED pin independent of which board is used.
-  If you want to know what pin the on-board LED is connected to on your Arduino
-  model, check the Technical Specs of your board at:
-  https://www.arduino.cc/en/Main/Products
+// Define the RX and TX pins for the DFPlayer Mini
+SoftwareSerial mySoftwareSerial(4, 5); // RX, TX
+DFRobotDFPlayerMini myDFPlayer;
 
-  modified 8 May 2014
-  by Scott Fitzgerald
-  modified 2 Sep 2016
-  by Arturo Guadalupi
-  modified 8 Sep 2016
-  by Colby Newman
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", -3 * 3600, 60000); // Set the offset to -3 hours for Brasília Standard Time
 
-  This example code is in the public domain.
+int previousHour = -1;
+int previousMinute = -1;
 
-  https://www.arduino.cc/en/Tutorial/BuiltInExamples/Blink
-*/
-
-// the setup function runs once when you press reset or power the board
 void setup() {
-  // initialize digital pin LED_BUILTIN as an output.
-  pinMode(LED_BUILTIN, OUTPUT);
+  Serial.begin(115200);
+  mySoftwareSerial.begin(9600);
+
+  // Connect to Wi-Fi
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
+
+  // Initialize DFPlayer Mini
+  if (!myDFPlayer.begin(mySoftwareSerial)) {
+    Serial.println(F("Unable to begin:"));
+    Serial.println(F("1. Please recheck the connection!"));
+    Serial.println(F("2. Please insert the SD card!"));
+    while (true);
+  }
+
+  // Set the volume (0 to 30)
+  myDFPlayer.volume(20);
+
+  // Start NTP time synchronization
+  timeClient.begin();
 }
 
-// the loop function runs over and over again forever
 void loop() {
-  digitalWrite(LED_BUILTIN, HIGH);  // turn the LED on (HIGH is the voltage level)
-  delay(1000);                      // wait for a second
-  digitalWrite(LED_BUILTIN, LOW);   // turn the LED off by making the voltage LOW
-  delay(1000);                      // wait for a second
+  timeClient.update();
+
+  int currentHour24 = timeClient.getHours();
+  int currentMinute = timeClient.getMinutes();
+  
+  // Convert to 12-hour format
+  int currentHour12 = (currentHour24 % 12 == 0) ? 12 : currentHour24 % 12;
+  
+  // Check if the hour has changed
+  if (currentHour24 != previousHour) {
+    playTrack(currentHour12); // Play track 1 every hour
+    delay(60000);
+    // Play track 2 as many times as the current hour
+    for (int i = 0; i < currentHour24; i++) {
+      playTrack(2);
+      delay(3000);
+    }
+
+    previousHour = currentHour24;
+  }
+
+  // Check if the minute has changed
+  if (currentMinute != previousMinute) {
+    // Play track 3 every half-hour
+    if (currentMinute % 30 == 0) {
+      playTrack(3);
+      delay(5000);
+    }
+
+    previousMinute = currentMinute;
+  }
+
+  delay(1000);
+}
+
+void playTrack(int trackNumber) {
+  Serial.println("Playing track " + String(trackNumber));
+  myDFPlayer.play(trackNumber);
+  
+  // Wait for the track to finish
+  delay(1000);
+  while (myDFPlayer.available()) {
+    delay(1000); // Wait for a short time to avoid false positives
+    if (!myDFPlayer.readState()) {
+      // Track has finished playing
+      break;
+    }
+  }
 }
